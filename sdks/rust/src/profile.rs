@@ -308,6 +308,116 @@ pub fn apply_engine_version(
     }
 }
 
+/// The brand Chrome lists in `userAgentData.brands` and `Sec-CH-UA`, Android included.
+const CHROME_BRAND: &str = "Google Chrome";
+
+/// Names the brand on a profile that names none, so the brand list is Chrome's and
+/// not only "Chromium" and GREASE; a brand the profile names stays. Launch calls it
+/// for phone profiles, whose library templates lacked the field. SDK equivalent of
+/// the launcher's profile migration.
+pub(crate) fn apply_chrome_brand(config: &mut Value) {
+    let Some(ch) = config.get_mut("client_hints").and_then(|v| v.as_object_mut()) else {
+        return;
+    };
+    if ch.get("brand").and_then(|v| v.as_str()).is_some_and(|b| !b.is_empty()) {
+        return;
+    }
+    ch.insert("brand".into(), Value::String(CHROME_BRAND.into()));
+}
+
+/// Blink features Chromium 156 ships on desktop and leaves off on Android (`status` in
+/// `third_party/blink/renderer/platform/runtime_enabled_features.json5`). A phone profile
+/// turns them off, so a page finds Chrome for Android's API set.
+pub(crate) const DESKTOP_ONLY_BLINK_FEATURES: &[&str] = &[
+    "AudioOutputDevices",
+    "CaptureController",
+    "CaptureHandle",
+    "CapturedSurfaceControl",
+    "ComputePressure",
+    "DocumentPictureInPictureAPI",
+    "DocumentPictureInPicturePreferInitialPlacement",
+    "DocumentPictureInPictureUserActivation",
+    "FontAccess",
+    "GetDisplayMedia",
+    "NavigatorContentUtils",
+    "NotificationConstructor",
+    "RTCDiagnosticLogging",
+    "WebHID",
+];
+
+/// On only on Android and implemented in Blink itself, so a desktop engine can answer
+/// it: `window.orientation` and `orientationchange`.
+pub(crate) const ANDROID_ONLY_BLINK_FEATURES: &[&str] = &["OrientationEvent"];
+
+/// A phone profile's `--disable-blink-features` / `--enable-blink-features`, and
+/// `extra` without the copies of those switches it folded in. Chromium keeps only the
+/// last copy of a switch, so the caller's own (often
+/// `--disable-blink-features=AutomationControlled`) joins ours instead of replacing it,
+/// and a feature the caller names wins over our lists. SDK equivalent of the
+/// launcher's `android_blink_features`.
+pub(crate) fn android_blink_switches(extra: &[String]) -> (Vec<String>, Vec<String>) {
+    let mut disable: Vec<String> = DESKTOP_ONLY_BLINK_FEATURES.iter().map(|s| s.to_string()).collect();
+    let mut enable: Vec<String> = ANDROID_ONLY_BLINK_FEATURES.iter().map(|s| s.to_string()).collect();
+    let mut rest = Vec::with_capacity(extra.len());
+    for arg in extra {
+        let (on, list) = if let Some(v) = arg.strip_prefix("--disable-blink-features=") {
+            (false, v)
+        } else if let Some(v) = arg.strip_prefix("--enable-blink-features=") {
+            (true, v)
+        } else {
+            rest.push(arg.clone());
+            continue;
+        };
+        for f in list.split(',').map(str::trim).filter(|f| !f.is_empty()) {
+            let (add, drop) = if on { (&mut enable, &mut disable) } else { (&mut disable, &mut enable) };
+            drop.retain(|have| have != f);
+            if !add.iter().any(|have| have == f) {
+                add.push(f.to_string());
+            }
+        }
+    }
+    let mut switches = vec![format!("--disable-blink-features={}", disable.join(","))];
+    if !enable.is_empty() {
+        switches.push(format!("--enable-blink-features={}", enable.join(",")));
+    }
+    (switches, rest)
+}
+
+/// WebGPU features Chrome 156 reports on Apple M-series that older templates lack.
+const APPLE_WEBGPU_ADDED: &[&str] = &["texture-compression-unaligned"];
+
+/// Adds `APPLE_WEBGPU_ADDED` to an Apple M-series profile's `webgpu.features`, in
+/// sorted place; touches nothing else. An absent or empty list means "the host's
+/// own" and stays as it is. SDK equivalent of the launcher's profile migration of
+/// the same name.
+pub(crate) fn apply_apple_webgpu_features(config: &mut Value) {
+    let apple_m = config
+        .pointer("/webgl/renderer")
+        .and_then(|v| v.as_str())
+        .and_then(|r| r.find("Apple M").map(|i| &r[i + 7..]))
+        .is_some_and(|rest| rest.starts_with(|c: char| c.is_ascii_digit()));
+    let apple_adapter = config.pointer("/webgpu/vendor").and_then(|v| v.as_str()) == Some("apple");
+    if !apple_m || !apple_adapter {
+        return;
+    }
+    let Some(list) = config.pointer_mut("/webgpu/features").and_then(|v| v.as_array_mut()) else {
+        return;
+    };
+    if list.is_empty() {
+        return;
+    }
+    for &feat in APPLE_WEBGPU_ADDED {
+        if list.iter().any(|v| v.as_str() == Some(feat)) {
+            continue;
+        }
+        let at = list
+            .iter()
+            .position(|v| v.as_str().is_some_and(|s| s > feat))
+            .unwrap_or(list.len());
+        list.insert(at, Value::String(feat.to_string()));
+    }
+}
+
 /// Per-profile state dir (cookies / IndexedDB / cache), preserved across
 /// launches. Defaults to `<profiles_root>/<id>/`.
 pub fn user_data_dir(runtime: &Runtime, profile_id: &str, base: Option<&Path>) -> Result<PathBuf> {
@@ -315,4 +425,96 @@ pub fn user_data_dir(runtime: &Runtime, profile_id: &str, base: Option<&Path>) -
     let d = root.join(profile_id);
     fs::create_dir_all(&d)?;
     Ok(d)
+}
+
+#[cfg(test)]
+mod apple_webgpu_tests {
+    use super::apply_apple_webgpu_features;
+    use serde_json::{json, Value};
+
+    const M1: &str = "ANGLE (Apple, ANGLE Metal Renderer: Apple M1, Unspecified Version)";
+
+    fn mac(renderer: &str, vendor: &str, features: Value) -> Value {
+        json!({ "webgl": { "renderer": renderer }, "webgpu": { "vendor": vendor, "features": features } })
+    }
+
+    #[test]
+    fn an_apple_m_list_gains_the_feature_in_sorted_place_once() {
+        let mut cfg = mac(M1, "apple", json!(["shader-f16", "texture-compression-etc2", "texture-formats-tier1"]));
+        apply_apple_webgpu_features(&mut cfg);
+        apply_apple_webgpu_features(&mut cfg);
+        assert_eq!(
+            cfg["webgpu"]["features"],
+            json!(["shader-f16", "texture-compression-etc2", "texture-compression-unaligned", "texture-formats-tier1"])
+        );
+    }
+
+    #[test]
+    fn other_gpus_and_an_empty_list_are_left_alone() {
+        for mut cfg in [
+            mac("ANGLE (Intel, Intel(R) Iris(TM) Plus Graphics)", "intel", json!(["shader-f16"])),
+            mac(M1, "intel", json!(["shader-f16"])),
+            mac(M1, "apple", json!([])),
+        ] {
+            let before = cfg.clone();
+            apply_apple_webgpu_features(&mut cfg);
+            assert_eq!(cfg, before);
+        }
+    }
+}
+
+#[cfg(test)]
+mod chrome_brand_tests {
+    use super::apply_chrome_brand;
+    use serde_json::json;
+
+    #[test]
+    fn a_profile_without_a_brand_gets_chromes_and_a_named_one_stays() {
+        let mut bare = json!({ "client_hints": { "mobile": true, "brand_version": "156" } });
+        apply_chrome_brand(&mut bare);
+        assert_eq!(bare["client_hints"]["brand"], "Google Chrome");
+        let mut empty = json!({ "client_hints": { "brand": "" } });
+        apply_chrome_brand(&mut empty);
+        assert_eq!(empty["client_hints"]["brand"], "Google Chrome");
+        let mut named = json!({ "client_hints": { "brand": "Microsoft Edge" } });
+        apply_chrome_brand(&mut named);
+        assert_eq!(named["client_hints"]["brand"], "Microsoft Edge");
+    }
+}
+
+#[cfg(test)]
+mod android_blink_tests {
+    use super::{android_blink_switches, ANDROID_ONLY_BLINK_FEATURES, DESKTOP_ONLY_BLINK_FEATURES};
+
+    #[test]
+    fn a_phone_turns_off_the_desktop_only_apis() {
+        let (switches, rest) = android_blink_switches(&[]);
+        assert_eq!(
+            switches,
+            [
+                format!("--disable-blink-features={}", DESKTOP_ONLY_BLINK_FEATURES.join(",")),
+                format!("--enable-blink-features={}", ANDROID_ONLY_BLINK_FEATURES.join(",")),
+            ]
+        );
+        assert!(rest.is_empty());
+    }
+
+    #[test]
+    fn the_callers_blink_switches_are_folded_in_and_win() {
+        let extra: Vec<String> = [
+            "--disable-blink-features=AutomationControlled,OrientationEvent",
+            "--lang=de",
+            "--enable-blink-features=NotificationConstructor",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        let (switches, rest) = android_blink_switches(&extra);
+        assert_eq!(rest, ["--lang=de"]);
+        assert_eq!(switches.len(), 2);
+        let off = &switches[0];
+        assert!(off.contains("AutomationControlled") && off.contains("OrientationEvent") && off.contains("WebHID"));
+        assert!(!off.contains("NotificationConstructor"), "{off}");
+        assert_eq!(switches[1], "--enable-blink-features=NotificationConstructor");
+    }
 }

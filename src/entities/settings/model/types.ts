@@ -5,17 +5,18 @@ export type Settings = {
   screen_resolution_mode?: string | null;
   api_enabled?: boolean;
   api_port?: number;
-  api_secret?: string;
   /** Shard Helper: offer to fill forms a generated identity fits. */
   helper_enabled?: boolean;
   /** Which field kinds it reacts to. Empty means all of them. */
   helper_triggers?: string[];
-  /** Profile's camera is ShardX's rather than the machine's. */
+  /** Profile's camera is ShardBrowser's rather than the machine's. */
   camera_enabled?: boolean;
   /** Hide to the tray on close instead of quitting. */
   minimize_to_tray?: boolean;
   /** Appended to every launch, one per line. Applied last, so a repeat wins. */
   extra_args?: string;
+  /** Ask the Web Store about linked extensions every 5 h (on when absent). */
+  ext_update_check?: boolean;
 };
 
 /** Where profiles, user-data, extensions and the trash live. */

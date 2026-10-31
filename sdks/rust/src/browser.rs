@@ -191,6 +191,10 @@ impl Browser {
             grease_version.as_deref(),
             self.runtime.tls().as_ref(),
         );
+        crate::profile::apply_apple_webgpu_features(&mut profile.config);
+        if profile.claims_mobile() {
+            crate::profile::apply_chrome_brand(&mut profile.config);
+        }
         apply_noise_seeds(&mut profile.config, &profile.id);
         let fp_file = udd.join("fingerprint.json");
         std::fs::write(&fp_file, serde_json::to_string(&profile.config)?)?;
@@ -253,11 +257,24 @@ impl Browser {
             let _ = std::fs::remove_file(&marker);
             argv.push("--remote-debugging-port=0".into());
             argv.push("--remote-allow-origins=*".into());
+            // Gates the Motion domain, which every synthesised click and
+            // keystroke goes through. Without it `Motion.createPointer` comes
+            // back as "wasn't found": the domain is absent from
+            // Schema.getDomains and /json/protocol rather than merely
+            // disabled, which is what keeps it free when nobody uses it. The
+            // launcher passes the same flag.
+            argv.push("--shardx-automation".into());
         }
         if opts.headless {
             argv.push("--headless=new".into());
         }
-        argv.extend(opts.extra_args.iter().cloned());
+        if profile.claims_mobile() {
+            let (switches, rest) = crate::profile::android_blink_switches(&opts.extra_args);
+            argv.extend(switches);
+            argv.extend(rest);
+        } else {
+            argv.extend(opts.extra_args.iter().cloned());
+        }
 
         let mut cmd = Command::new(self.runtime.binary_path());
         cmd.args(&argv)

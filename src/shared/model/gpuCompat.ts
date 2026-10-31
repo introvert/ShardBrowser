@@ -37,7 +37,7 @@ export const useGpuCompat = create<State>((set, get) => ({
   byId: {},
   loaded: false,
   loading: false,
-  suppressed: localStorage.getItem(WARN_OFF_KEY) === "1",
+  suppressed: (() => { try { return localStorage.getItem(WARN_OFF_KEY) === "1"; } catch { return false; } })(),
 
   load: async () => {
     if (get().loading || get().loaded) return;
@@ -56,7 +56,7 @@ export const useGpuCompat = create<State>((set, get) => ({
   },
 
   setSuppressed: (v) => {
-    localStorage.setItem(WARN_OFF_KEY, v ? "1" : "0");
+    try { localStorage.setItem(WARN_OFF_KEY, v ? "1" : "0"); } catch { /* private mode: until reload */ }
     set({ suppressed: v });
   },
 
@@ -75,4 +75,19 @@ export function useGpuCompatReady() {
   useEffect(() => {
     void load();
   }, [load]);
+}
+
+/** How long anything waits for the verdicts: the check starts the engine and can
+ *  hang (no display, no GPU), so past this the caller goes on without them. */
+export const VERDICT_WAIT_MS = 1000;
+
+/** Loads this machine's GPU verdicts, waiting at most `limitMs`; true when they are in. */
+export function verdictsLoaded(limitMs = VERDICT_WAIT_MS): Promise<boolean> {
+  void useGpuCompat.getState().load();
+  if (useGpuCompat.getState().loaded) return Promise.resolve(true);
+  return new Promise<boolean>((resolve) => {
+    const done = (inTime: boolean) => { clearTimeout(timer); stop(); resolve(inTime); };
+    const timer = setTimeout(() => done(false), limitMs);
+    const stop = useGpuCompat.subscribe((s) => { if (s.loaded) done(true); });
+  });
 }

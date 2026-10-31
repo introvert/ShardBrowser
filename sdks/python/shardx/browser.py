@@ -26,7 +26,13 @@ from .auto_resolve import has_auto_fields, resolve_auto_fields
 from .geo import GeoInfo, geo_check_via
 from .profile import Profile, user_data_dir as _user_data_dir
 from .proxy import ParsedProxy, parse_proxy, probe_udp
-from .runtime import Runtime, apply_engine_version
+from .runtime import (
+    Runtime,
+    android_blink_switches,
+    apply_apple_webgpu_features,
+    apply_chrome_brand,
+    apply_engine_version,
+)
 from .screen import apply_screen_strategy, default_mode_for
 
 _NOISE_DEFAULT = {
@@ -156,6 +162,9 @@ class Browser:
             self.runtime.grease_version,
             self.runtime.tls,
         )
+        apply_apple_webgpu_features(profile.config)
+        if profile.claims_mobile:
+            apply_chrome_brand(profile.config)
         apply_noise_seeds(profile.config, profile.id)
         fp_file = udd / "fingerprint.json"
         fp_file.write_text(json.dumps(profile.config), encoding="utf-8")
@@ -201,11 +210,24 @@ class Browser:
                 argv.append(f"--shardx-webrtc-public-ip={ip}")
         if cdp:
             (udd / "DevToolsActivePort").unlink(missing_ok=True)
-            argv += ["--remote-debugging-port=0", "--remote-allow-origins=*"]
+            # Gates the Motion domain, which every synthesised click and
+            # keystroke goes through. Without it `Motion.createPointer` comes
+            # back as "wasn't found": the domain is not merely disabled, it is
+            # absent from Schema.getDomains and /json/protocol, which is what
+            # keeps it free when nobody uses it. The launcher passes the same
+            # flag whenever it opens a profile for automation.
+            argv += [
+                "--remote-debugging-port=0",
+                "--remote-allow-origins=*",
+                "--shardx-automation",
+            ]
         if headless:
             argv.append("--headless=new")
-        if extra_args:
-            argv += list(extra_args)
+        extra = list(extra_args or [])
+        if profile.claims_mobile:
+            switches, extra = android_blink_switches(extra)
+            argv += switches
+        argv += extra
 
         proc_env = os.environ.copy()
         if env:

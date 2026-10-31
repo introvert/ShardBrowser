@@ -202,6 +202,105 @@ export function applyEngineVersion(
   }
 }
 
+/** The brand Chrome lists in `userAgentData.brands` and `Sec-CH-UA`, Android included. */
+const CHROME_BRAND = "Google Chrome";
+
+/**
+ * Name the brand on a profile that names none, so the brand list is Chrome's and
+ * not only "Chromium" and GREASE; a brand the profile names stays. Launch calls
+ * it for phone profiles, whose library templates lacked the field. Mutates
+ * `config` in place. SDK equivalent of the launcher's profile migration.
+ */
+export function applyChromeBrand(config: Record<string, unknown>): void {
+  const ch = config["client_hints"] as Record<string, unknown> | undefined;
+  if (!ch || typeof ch !== "object") return;
+  if (typeof ch["brand"] === "string" && ch["brand"] !== "") return;
+  ch["brand"] = CHROME_BRAND;
+}
+
+/**
+ * Blink features Chromium 156 ships on desktop and leaves off on Android (`status`
+ * in third_party/blink/renderer/platform/runtime_enabled_features.json5). A phone
+ * profile turns them off, so a page finds Chrome for Android's API set.
+ */
+export const DESKTOP_ONLY_BLINK_FEATURES: readonly string[] = [
+  "AudioOutputDevices",
+  "CaptureController",
+  "CaptureHandle",
+  "CapturedSurfaceControl",
+  "ComputePressure",
+  "DocumentPictureInPictureAPI",
+  "DocumentPictureInPicturePreferInitialPlacement",
+  "DocumentPictureInPictureUserActivation",
+  "FontAccess",
+  "GetDisplayMedia",
+  "NavigatorContentUtils",
+  "NotificationConstructor",
+  "RTCDiagnosticLogging",
+  "WebHID",
+];
+
+/** On only on Android and implemented in Blink itself, so a desktop engine can
+ *  answer it: `window.orientation` and `orientationchange`. */
+export const ANDROID_ONLY_BLINK_FEATURES: readonly string[] = ["OrientationEvent"];
+
+/**
+ * A phone profile's `--disable-blink-features` / `--enable-blink-features`, and
+ * `extraArgs` without the copies of those switches it folded in. Chromium keeps
+ * only the last copy of a switch, so the caller's own (often
+ * `--disable-blink-features=AutomationControlled`) joins ours instead of replacing
+ * it, and a feature the caller names wins over our lists. SDK equivalent of the
+ * launcher's `android_blink_features`.
+ */
+export function androidBlinkSwitches(extraArgs: readonly string[]): { switches: string[]; rest: string[] } {
+  const disable = [...DESKTOP_ONLY_BLINK_FEATURES];
+  const enable = [...ANDROID_ONLY_BLINK_FEATURES];
+  const rest: string[] = [];
+  for (const arg of extraArgs) {
+    let add: string[], drop: string[], value: string;
+    if (arg.startsWith("--disable-blink-features=")) {
+      [add, drop, value] = [disable, enable, arg.slice("--disable-blink-features=".length)];
+    } else if (arg.startsWith("--enable-blink-features=")) {
+      [add, drop, value] = [enable, disable, arg.slice("--enable-blink-features=".length)];
+    } else {
+      rest.push(arg);
+      continue;
+    }
+    for (const f of value.split(",").map((x) => x.trim()).filter(Boolean)) {
+      const at = drop.indexOf(f);
+      if (at >= 0) drop.splice(at, 1);
+      if (!add.includes(f)) add.push(f);
+    }
+  }
+  const switches = [`--disable-blink-features=${disable.join(",")}`];
+  if (enable.length) switches.push(`--enable-blink-features=${enable.join(",")}`);
+  return { switches, rest };
+}
+
+/** WebGPU features Chrome 156 reports on Apple M-series that older templates lack. */
+const APPLE_WEBGPU_ADDED = ["texture-compression-unaligned"];
+
+/**
+ * Add `APPLE_WEBGPU_ADDED` to an Apple M-series profile's `webgpu.features`, in
+ * sorted place; touches nothing else. An absent or empty list means "the host's
+ * own" and stays as it is. Mutates `config` in place. SDK equivalent of the
+ * launcher's profile migration of the same name.
+ */
+export function applyAppleWebGpuFeatures(config: Record<string, unknown>): void {
+  const renderer = (config["webgl"] as Record<string, unknown> | undefined)?.["renderer"];
+  const webgpu = config["webgpu"] as Record<string, unknown> | undefined;
+  if (typeof renderer !== "string" || webgpu?.["vendor"] !== "apple") return;
+  const at = renderer.indexOf("Apple M");
+  if (at < 0 || !/[0-9]/.test(renderer.charAt(at + 7))) return;
+  const list = webgpu["features"];
+  if (!Array.isArray(list) || list.length === 0) return;
+  for (const feat of APPLE_WEBGPU_ADDED) {
+    if (list.includes(feat)) continue;
+    const i = list.findIndex((v) => typeof v === "string" && v > feat);
+    list.splice(i < 0 ? list.length : i, 0, feat);
+  }
+}
+
 /** Per-profile state (cookies / IndexedDB / cache) — preserved across
  *  launches. Defaults to `./shardx-profiles/<id>/` next to the running
  *  script. Override per launch with `userDataDir` or per SDK with

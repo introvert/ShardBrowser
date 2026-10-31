@@ -6,11 +6,15 @@
   </picture>
 </p>
 
-<h1 align="center">ShardX Launcher</h1>
+<h1 align="center">ShardBrowser Launcher</h1>
 
 <p align="center">
   <strong>A free, open-source anti-detect browser launcher for web scraping and multi-accounting.</strong><br>
-  Patched Chromium 152 with engine-level fingerprint spoofing, a local API, an MCP server and SDKs.
+  Patched Chromium 156 with engine-level fingerprint spoofing, a local API, an MCP server and SDKs.
+</p>
+
+<p align="center">
+  Website: <a href="https://shardbrowser.com/?utm_source=github&amp;utm_medium=readme&amp;utm_campaign=shardbrowser"><strong>shardbrowser.com</strong></a>
 </p>
 
 <p align="center">
@@ -42,7 +46,7 @@ active **p0f TCP fingerprint spoofing** at the proxy exit. This keeps the
 operating system presented by the proxy consistent with the SYN/ACK shape
 seen by websites. ShardX is the anti-detect browser stack built to use
 those capabilities. The launcher manages profiles, binds proxies and
-ships a patched **Chromium 152** build that applies fingerprint changes
+ships a patched **Chromium 156** build that applies fingerprint changes
 inside the browser engine.
 
 <p align="center">
@@ -82,7 +86,7 @@ Configuration details are available in [Usage](#usage).
     <picture>
       <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/00-launcher-dark.png">
       <source media="(prefers-color-scheme: light)" srcset="docs/screenshots/00-launcher-light.png">
-      <img src="docs/screenshots/00-launcher-light.png" alt="ShardX Launcher with active browser profiles" width="920">
+      <img src="docs/screenshots/00-launcher-light.png" alt="ShardBrowser Launcher with active browser profiles" width="920">
     </picture>
   </kbd>
 </p>
@@ -154,7 +158,7 @@ iframes, web workers, developer tools and headless mode.
   exit IP. Host GPS and Wi-Fi data are never used.
 * **Network capability:** connection type, downlink, RTT, save-data,
   storage quota, JS heap limit, battery state, media-device counts.
-* **TLS ClientHello:** Chrome 152 cipher suites and signature algorithms
+* **TLS ClientHello:** Chrome 156 cipher suites and signature algorithms
   with extension shuffling. JA4, Akamai and Peetprint
   fingerprints match the browser version.
 * **HTTP-3 over the proxy's UDP relay:** QUIC works end to end through
@@ -167,7 +171,9 @@ iframes, web workers, developer tools and headless mode.
   Mouse and wheel reach the page as finger touches, the viewport lays
   out at mobile widths, screen orientation follows the claimed screen
   and can be turned over the debugging port, motion sensors report a
-  device being held, and the font set is the handset's. Protected video
+  device being held, the font set is the handset's, and the web APIs
+  Chrome for Android leaves out (screen capture, local font access,
+  WebHID, the `Notification` constructor) are absent. Protected video
   at the level a phone claims is an opt-in switch per profile.
 * **Speech voices:** full per-OS `speechSynthesis.getVoices()`
   enumeration (200+ macOS voices, SAPI + Google for Windows, Google-only
@@ -204,7 +210,7 @@ iframes, web workers, developer tools and headless mode.
   crash-restore bubble), bulk import, folder / tag organization, pin
   to top, clone.
 * **Fingerprint library:** 220 starter profiles shipped via CDN
-  (36 mac-arm64 / 131 windows-x64 / 19 linux-x64 / 50 android). Profile
+  (31 mac-arm64 / 120 windows-x64 / 19 linux-x64 / 50 android). Profile
   editor randomizes CPU / RAM / platform-version when you change the
   GPU, and the OS selector includes Android.
 * **Proxy manager:** SOCKS5 / HTTP / HTTPS, bulk paste-import,
@@ -218,6 +224,9 @@ iframes, web workers, developer tools and headless mode.
   opens a DRM page, and the launcher keeps that copy and hands it to
   every profile after — so the CDM is always the version Google is
   currently serving.
+* **Team spaces and sync:** share profiles with a team, or carry your own
+  profiles between computers, through a server you run yourself. See
+  [Team spaces and sync](#5-team-spaces-and-sync-self-hosted).
 * **Synchronised windows:** you work in one window and every other window
   in the group repeats what you did, in its own profile. Pointer,
   keystrokes, scrolling, tabs opened and closed, extension popups. It is
@@ -314,7 +323,7 @@ iframes, web workers, developer tools and headless mode.
 The QUIC handshake completes end to end through the SOCKS5 UDP relay.
 Twilio's UDP, TCP and TLS WebRTC tests pass without exposing the host IP.
 
-| [browserleaks.com/quic](https://browserleaks.com/quic): QUIC `True`, JA4 matches Chrome 152 | [networktest.twilio.com](https://networktest.twilio.com): every probe `Pass` |
+| [browserleaks.com/quic](https://browserleaks.com/quic): QUIC `True`, JA4 matches Chrome 156 | [networktest.twilio.com](https://networktest.twilio.com): every probe `Pass` |
 |-------------------------------------------------------------|------------------------------------------------------------|
 | <kbd><img src="docs/screenshots/01-browserleaks-quic.jpg" alt="QUIC over SOCKS5 UDP relay" width="100%"></kbd> | <kbd><img src="docs/screenshots/04-twilio-webrtc.jpg" alt="Twilio WebRTC network test" width="100%"></kbd> |
 
@@ -359,7 +368,7 @@ the browser engine.
 | Client Hints (Sec-CH-UA-* full stack with GREASE)             | ✅ full                       | ❌ partial / inconsistent     | ✅ full on Multilogin / AdsPower, ❌ Dolphin     |
 | Font enumeration pinned per profile                           | ✅ system-level               | ❌ JS-only, host fonts still leak via CSS / canvas font-render | ⚠️ partial          |
 | V8 / CDP side-channel hardening (preview-getters, inspector)  | ✅ closed                     | ❌ open, CDP automation detectable | ⚠️ partial                                |
-| TLS ClientHello fingerprint (JA4)                             | ✅ matches real Chrome 152    | ⚠️ static, may drift after browser updates | ✅ matches the forked Chrome version            |
+| TLS ClientHello fingerprint (JA4)                             | ✅ matches real Chrome 156    | ⚠️ static, may drift after browser updates | ✅ matches the forked Chrome version            |
 | QUIC / HTTP-3 over SOCKS5                                     | ✅ stable end to end via UDP relay | ⚠️ unstable, falls back to TCP or drops mid-session | ❌ disabled when proxy is set |
 | WebRTC over SOCKS5 (no real-IP leak via STUN)                 | ✅ proxy UDP relay or synth candidates | ⚠️ same UDP relay path, same instability | ⚠️ disable-only            |
 | Consistency of generated profiles                             | ✅ coherent device (GPU, CPU, RAM, UA and fonts) | ❌ frequent contradictions (Win UA + Mac GPU, mobile UA + desktop screen, etc.) | ⚠️ varies |
@@ -426,7 +435,7 @@ so the operating system may show a warning on first launch:
   and should be moved to the Trash. Both messages can be resolved by
   removing the quarantine attribute once in Terminal:
   ```bash
-  xattr -dr com.apple.quarantine "/Applications/ShardX Launcher.app"
+  xattr -dr com.apple.quarantine "/Applications/ShardBrowser Launcher.app"
   ```
   The app should then open normally. For the developer verification
   warning, right-click the app, select *Open* and confirm once.
@@ -826,6 +835,95 @@ server-side worker without installing the GUI.
 * **Node:** [sdks/node/README.md](sdks/node/README.md), `npm install @proxyshard/shardx`
 * **Rust:** [sdks/rust/README.md](sdks/rust/README.md), `cargo add shardx`
 
+### 5. Team spaces and sync (self-hosted)
+
+**Team spaces** let several people work with the same profiles through a
+server you run yourself. **Personal sync** carries your own profiles to
+your other computers through the same kind of server. Nothing goes through
+our infrastructure: the server, its database and the profiles' sessions
+stay on a machine you control.
+
+#### Run the server
+
+It is one program with its database built in. Run it on any machine all
+your computers can reach: a VPS, a home server, a computer that stays on.
+
+With Docker:
+
+```bash
+docker run -d --name shardbrowser-team --restart unless-stopped \
+  -p 8787:8787 -v shardbrowser-team:/data \
+  -e SHARDBROWSER_TEAM_NAME='My team' \
+  -e SHARDBROWSER_TEAM_BIND=0.0.0.0:8787 -e SHARDBROWSER_TEAM_DATA_DIR=/data \
+  ghcr.io/proxyshard/shardbrowser-team-server:latest
+docker logs shardbrowser-team
+```
+
+Or download `shardbrowser-team-server` for Linux x64 / arm64, macOS arm64
+or Windows x64 from the [latest release](https://github.com/ProxyShard/ShardBrowser/releases/latest)
+and start it:
+
+```bash
+chmod +x ./shardbrowser-team-server
+SHARDBROWSER_TEAM_NAME='My team' SHARDBROWSER_TEAM_BIND=0.0.0.0:8787 \
+  SHARDBROWSER_TEAM_DATA_DIR=./team-data ./shardbrowser-team-server
+```
+
+On its first start the server prints an admin invite such as
+`http://203.0.113.10:8787#…`. In the launcher open the space switcher at
+the bottom of the sidebar, choose **Join a team…** and paste it. The
+**Create a team…** guide in the same menu shows these commands with your
+team's name filled in.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `SHARDBROWSER_TEAM_BIND` | `127.0.0.1:8787` | Address and port to listen on. Use `0.0.0.0:8787` to accept other computers. |
+| `SHARDBROWSER_TEAM_DATA_DIR` | `./data` | Folder with `team.sqlite` and `server.key`. |
+| `SHARDBROWSER_TEAM_NAME` | `Team` | The team's name, read on the first start only. |
+| `SHARDBROWSER_TEAM_TRASH_DAYS` | `30` | Days a deleted team item stays in the team's Trash. |
+| `SHARDBROWSER_TEAM_PUBLIC_URL` | `http://` + bind address | The address invites start with, when the server is reached under another address (NAT, a domain, a port forward). |
+
+`shardbrowser-team-server --print-invite` prints a fresh admin invite at
+any time, also while the server is running.
+
+**Plain http on an IP address is fine, also over the internet.** The
+launcher and the server encrypt the connection themselves, and the invite
+pins the server's key, so no domain, certificate or reverse proxy is
+needed. The server needs ShardBrowser Launcher 2.1.1 or newer.
+
+**Back up the data folder**: `team.sqlite` and `server.key` together. The
+database is encrypted with that key and cannot be read without it.
+
+#### Team spaces
+
+* The admin invites members from the **Team** page and gives rights per
+  team, folder or profile: see, start, edit, create, delete, cookies and
+  take out. The narrowest rule wins; at equal width a refusal wins.
+* A profile is open on one computer at a time. When it closes, its
+  session (cookies, logins, site storage) goes back to the server, and the
+  next person opens it where it was left.
+* Bookmarks, extensions, tags, folders and automation projects can belong
+  to the team as well.
+* Removing a member ends their access at once. Deleted items wait in the
+  team's Trash, 30 days by default.
+* The server does not need the admin online.
+
+#### Personal sync
+
+Open **Settings › Sync** and connect to your own server (with its admin
+invite) or to the server of a team you are in. Then choose what travels:
+profiles with their sessions, proxies, folders, tags, bookmarks,
+extensions and automation projects. To add another computer, copy the
+invite from the same page and paste it there.
+
+* A profile open on one computer cannot start on another until it is
+  closed there.
+* Changes made without a connection are sent when the server is back. If
+  the same profile changed on two computers, both versions are kept.
+* Launcher settings and the fingerprint library stay on each computer.
+  Secret values in automation steps never leave the computer they were
+  typed on.
+
 ---
 
 ## Licensing
@@ -835,7 +933,7 @@ React UI and Rust source, is available under the **MIT License**. See
 [LICENSE](LICENSE). You may use, fork, modify and distribute the launcher,
 including for commercial projects.
 
-The **browser engine** (the patched Chromium 152 binary that the
+The **browser engine** (the patched Chromium 156 binary that the
 launcher downloads from our CDN on first run) is distributed as a
 **closed-source binary**. Its source is not published in this
 repository or elsewhere, and the following are explicitly **not

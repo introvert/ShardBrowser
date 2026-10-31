@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "../../../shared/api/invoke";
 import type { ProfileMeta } from "./types";
 
 export const profileList = () => invoke<ProfileMeta[]>("profile_list");
@@ -10,10 +10,16 @@ export const profileSetPin = (id: string, pinned: boolean) => invoke("profile_se
 export const profileSetFolder = (id: string, folder: string) => invoke("profile_set_folder", { id, folder });
 export const profileBindProxy = (profileId: string, proxyId: string | null) => invoke("profile_bind_proxy", { profileId, proxyId });
 export const profileImport = (payloads: any[]) => invoke<number>("profile_import", { payloads });
-export const profileCreateFromTemplate = (templateId: string) => invoke<ProfileMeta>("profile_create_from_template", { templateId });
-export const processList = () => invoke<{ profile_id: string; pid: number; uptime_ms: number }[]>("process_list");
+/** The debugging endpoint of a profile started with CDP; absent otherwise. */
+export type CdpInfo = { port: number; http_url: string; web_socket_debugger_url: string };
+export const processList = () =>
+  invoke<{ profile_id: string; pid: number; uptime_ms: number; cdp?: CdpInfo }[]>("process_list");
 export const processKill = (profileId: string) => invoke<boolean>("process_kill", { profileId });
 export const launch = (profileId: string) => invoke<number>("launch", { profileId });
+/** Ends a launch in progress (backend B49). The backend has no such command yet: it rejects, and the caller falls back. */
+export const launchCancel = (profileId: string) => invoke<void>("launch_cancel", { profileId });
+/** Brings a running profile's browser window to the front, with the keyboard. */
+export const profileFocusWindow = (profileId: string) => invoke<void>("profile_focus_window", { profileId });
 
 /** A group of profiles that mirror each other's input. Returns the group name. */
 export const syncLaunch = (profileIds: string[], group?: string) =>
@@ -44,7 +50,21 @@ export const helperShow = (profile: string) => invoke<void>("helper_show", { pro
 export const helperClose = () => invoke<void>("helper_close");
 /** The operator closed the panel — a refusal about this page only. */
 export const helperDismiss = (profile: string) => invoke<void>("helper_dismiss", { profile });
+/** The kept entry and the look follow the name. */
+export const folderRename = (oldName: string, newName: string) => invoke<number>("folder_rename", { old: oldName, new: newName });
+/** The kept entry and the look go with the folder. */
 export const folderDelete = (folder: string, deleteProfiles: boolean) => invoke<number>("folder_delete", { folder, deleteProfiles });
+
+/** A folder's color (a palette id) and icon, as the backend keeps them (folders.rs). */
+export type StoredFolderMeta = { color: string | null; icon: string };
+/** Folders kept while empty, and each folder's look by name. */
+export type FolderState = { registry: string[]; meta: Record<string, StoredFolderMeta> };
+export const folderList = () => invoke<FolderState>("folder_list");
+/** Keeps the folder while no profile is in it. */
+export const folderAdd = (name: string) => invoke<null>("folder_add", { name });
+export const folderMetaSet = (name: string, meta: StoredFolderMeta) => invoke<null>("folder_meta_set", { name, meta });
+/** Hands over the copy an older build kept in this window; false when the backend had folders already. */
+export const folderImport = (state: FolderState) => invoke<boolean>("folder_import", { state });
 export const cookiesExportToFile = (profileId: string, path: string) => invoke<number>("cookies_export_to_file", { profileId, path });
 export const cookiesImport = (profileId: string, cookies: any[]) => invoke<number>("cookies_import", { profileId, cookies });
 export const enrichPicksForPreset = (presetId: string) => invoke<{ hardware_concurrency?: number; device_memory?: number; platform_version?: string }>("enrich_picks_for_preset", { presetId });
