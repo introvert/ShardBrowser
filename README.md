@@ -171,7 +171,9 @@ iframes, web workers, developer tools and headless mode.
   Mouse and wheel reach the page as finger touches, the viewport lays
   out at mobile widths, screen orientation follows the claimed screen
   and can be turned over the debugging port, motion sensors report a
-  device being held, and the font set is the handset's. Protected video
+  device being held, the font set is the handset's, and the web APIs
+  Chrome for Android leaves out (screen capture, local font access,
+  WebHID, the `Notification` constructor) are absent. Protected video
   at the level a phone claims is an opt-in switch per profile.
 * **Speech voices:** full per-OS `speechSynthesis.getVoices()`
   enumeration (200+ macOS voices, SAPI + Google for Windows, Google-only

@@ -268,7 +268,13 @@ impl Browser {
         if opts.headless {
             argv.push("--headless=new".into());
         }
-        argv.extend(opts.extra_args.iter().cloned());
+        if profile.claims_mobile() {
+            let (switches, rest) = crate::profile::android_blink_switches(&opts.extra_args);
+            argv.extend(switches);
+            argv.extend(rest);
+        } else {
+            argv.extend(opts.extra_args.iter().cloned());
+        }
 
         let mut cmd = Command::new(self.runtime.binary_path());
         cmd.args(&argv)

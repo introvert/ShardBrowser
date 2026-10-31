@@ -325,6 +325,64 @@ pub(crate) fn apply_chrome_brand(config: &mut Value) {
     ch.insert("brand".into(), Value::String(CHROME_BRAND.into()));
 }
 
+/// Blink features Chromium 156 ships on desktop and leaves off on Android (`status` in
+/// `third_party/blink/renderer/platform/runtime_enabled_features.json5`). A phone profile
+/// turns them off, so a page finds Chrome for Android's API set.
+pub(crate) const DESKTOP_ONLY_BLINK_FEATURES: &[&str] = &[
+    "AudioOutputDevices",
+    "CaptureController",
+    "CaptureHandle",
+    "CapturedSurfaceControl",
+    "ComputePressure",
+    "DocumentPictureInPictureAPI",
+    "DocumentPictureInPicturePreferInitialPlacement",
+    "DocumentPictureInPictureUserActivation",
+    "FontAccess",
+    "GetDisplayMedia",
+    "NavigatorContentUtils",
+    "NotificationConstructor",
+    "RTCDiagnosticLogging",
+    "WebHID",
+];
+
+/// On only on Android and implemented in Blink itself, so a desktop engine can answer
+/// it: `window.orientation` and `orientationchange`.
+pub(crate) const ANDROID_ONLY_BLINK_FEATURES: &[&str] = &["OrientationEvent"];
+
+/// A phone profile's `--disable-blink-features` / `--enable-blink-features`, and
+/// `extra` without the copies of those switches it folded in. Chromium keeps only the
+/// last copy of a switch, so the caller's own (often
+/// `--disable-blink-features=AutomationControlled`) joins ours instead of replacing it,
+/// and a feature the caller names wins over our lists. SDK equivalent of the
+/// launcher's `android_blink_features`.
+pub(crate) fn android_blink_switches(extra: &[String]) -> (Vec<String>, Vec<String>) {
+    let mut disable: Vec<String> = DESKTOP_ONLY_BLINK_FEATURES.iter().map(|s| s.to_string()).collect();
+    let mut enable: Vec<String> = ANDROID_ONLY_BLINK_FEATURES.iter().map(|s| s.to_string()).collect();
+    let mut rest = Vec::with_capacity(extra.len());
+    for arg in extra {
+        let (on, list) = if let Some(v) = arg.strip_prefix("--disable-blink-features=") {
+            (false, v)
+        } else if let Some(v) = arg.strip_prefix("--enable-blink-features=") {
+            (true, v)
+        } else {
+            rest.push(arg.clone());
+            continue;
+        };
+        for f in list.split(',').map(str::trim).filter(|f| !f.is_empty()) {
+            let (add, drop) = if on { (&mut enable, &mut disable) } else { (&mut disable, &mut enable) };
+            drop.retain(|have| have != f);
+            if !add.iter().any(|have| have == f) {
+                add.push(f.to_string());
+            }
+        }
+    }
+    let mut switches = vec![format!("--disable-blink-features={}", disable.join(","))];
+    if !enable.is_empty() {
+        switches.push(format!("--enable-blink-features={}", enable.join(",")));
+    }
+    (switches, rest)
+}
+
 /// WebGPU features Chrome 156 reports on Apple M-series that older templates lack.
 const APPLE_WEBGPU_ADDED: &[&str] = &["texture-compression-unaligned"];
 
@@ -421,5 +479,42 @@ mod chrome_brand_tests {
         let mut named = json!({ "client_hints": { "brand": "Microsoft Edge" } });
         apply_chrome_brand(&mut named);
         assert_eq!(named["client_hints"]["brand"], "Microsoft Edge");
+    }
+}
+
+#[cfg(test)]
+mod android_blink_tests {
+    use super::{android_blink_switches, ANDROID_ONLY_BLINK_FEATURES, DESKTOP_ONLY_BLINK_FEATURES};
+
+    #[test]
+    fn a_phone_turns_off_the_desktop_only_apis() {
+        let (switches, rest) = android_blink_switches(&[]);
+        assert_eq!(
+            switches,
+            [
+                format!("--disable-blink-features={}", DESKTOP_ONLY_BLINK_FEATURES.join(",")),
+                format!("--enable-blink-features={}", ANDROID_ONLY_BLINK_FEATURES.join(",")),
+            ]
+        );
+        assert!(rest.is_empty());
+    }
+
+    #[test]
+    fn the_callers_blink_switches_are_folded_in_and_win() {
+        let extra: Vec<String> = [
+            "--disable-blink-features=AutomationControlled,OrientationEvent",
+            "--lang=de",
+            "--enable-blink-features=NotificationConstructor",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        let (switches, rest) = android_blink_switches(&extra);
+        assert_eq!(rest, ["--lang=de"]);
+        assert_eq!(switches.len(), 2);
+        let off = &switches[0];
+        assert!(off.contains("AutomationControlled") && off.contains("OrientationEvent") && off.contains("WebHID"));
+        assert!(!off.contains("NotificationConstructor"), "{off}");
+        assert_eq!(switches[1], "--enable-blink-features=NotificationConstructor");
     }
 }

@@ -223,6 +223,21 @@ pub fn claims_mobile(config: &serde_json::Map<String, serde_json::Value>) -> boo
         .contains("android")
 }
 
+/// A desktop Linux machine. Android is excluded: its platform string is Linux too.
+/// Same rule as the SDKs' `claims_linux_desktop`.
+pub fn claims_linux_desktop(config: &serde_json::Map<String, serde_json::Value>) -> bool {
+    if claims_mobile(config) {
+        return false;
+    }
+    let platform = config
+        .get("navigator")
+        .and_then(|n| n.get("platform"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    platform.starts_with("linux") || platform.starts_with("x11")
+}
+
 fn is_false(b: &bool) -> bool {
     !*b
 }

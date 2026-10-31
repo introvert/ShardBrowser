@@ -218,6 +218,65 @@ export function applyChromeBrand(config: Record<string, unknown>): void {
   ch["brand"] = CHROME_BRAND;
 }
 
+/**
+ * Blink features Chromium 156 ships on desktop and leaves off on Android (`status`
+ * in third_party/blink/renderer/platform/runtime_enabled_features.json5). A phone
+ * profile turns them off, so a page finds Chrome for Android's API set.
+ */
+export const DESKTOP_ONLY_BLINK_FEATURES: readonly string[] = [
+  "AudioOutputDevices",
+  "CaptureController",
+  "CaptureHandle",
+  "CapturedSurfaceControl",
+  "ComputePressure",
+  "DocumentPictureInPictureAPI",
+  "DocumentPictureInPicturePreferInitialPlacement",
+  "DocumentPictureInPictureUserActivation",
+  "FontAccess",
+  "GetDisplayMedia",
+  "NavigatorContentUtils",
+  "NotificationConstructor",
+  "RTCDiagnosticLogging",
+  "WebHID",
+];
+
+/** On only on Android and implemented in Blink itself, so a desktop engine can
+ *  answer it: `window.orientation` and `orientationchange`. */
+export const ANDROID_ONLY_BLINK_FEATURES: readonly string[] = ["OrientationEvent"];
+
+/**
+ * A phone profile's `--disable-blink-features` / `--enable-blink-features`, and
+ * `extraArgs` without the copies of those switches it folded in. Chromium keeps
+ * only the last copy of a switch, so the caller's own (often
+ * `--disable-blink-features=AutomationControlled`) joins ours instead of replacing
+ * it, and a feature the caller names wins over our lists. SDK equivalent of the
+ * launcher's `android_blink_features`.
+ */
+export function androidBlinkSwitches(extraArgs: readonly string[]): { switches: string[]; rest: string[] } {
+  const disable = [...DESKTOP_ONLY_BLINK_FEATURES];
+  const enable = [...ANDROID_ONLY_BLINK_FEATURES];
+  const rest: string[] = [];
+  for (const arg of extraArgs) {
+    let add: string[], drop: string[], value: string;
+    if (arg.startsWith("--disable-blink-features=")) {
+      [add, drop, value] = [disable, enable, arg.slice("--disable-blink-features=".length)];
+    } else if (arg.startsWith("--enable-blink-features=")) {
+      [add, drop, value] = [enable, disable, arg.slice("--enable-blink-features=".length)];
+    } else {
+      rest.push(arg);
+      continue;
+    }
+    for (const f of value.split(",").map((x) => x.trim()).filter(Boolean)) {
+      const at = drop.indexOf(f);
+      if (at >= 0) drop.splice(at, 1);
+      if (!add.includes(f)) add.push(f);
+    }
+  }
+  const switches = [`--disable-blink-features=${disable.join(",")}`];
+  if (enable.length) switches.push(`--enable-blink-features=${enable.join(",")}`);
+  return { switches, rest };
+}
+
 /** WebGPU features Chrome 156 reports on Apple M-series that older templates lack. */
 const APPLE_WEBGPU_ADDED = ["texture-compression-unaligned"];
 

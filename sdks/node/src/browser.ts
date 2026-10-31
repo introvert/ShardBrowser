@@ -14,7 +14,14 @@ import { join } from "node:path";
 
 import { hasAutoFields, resolveAutoFields } from "./autoResolve.js";
 import { geoCheckVia, type GeoInfo } from "./geo.js";
-import { Profile, userDataDir, applyAppleWebGpuFeatures, applyChromeBrand, applyEngineVersion } from "./profile.js";
+import {
+  Profile,
+  userDataDir,
+  androidBlinkSwitches,
+  applyAppleWebGpuFeatures,
+  applyChromeBrand,
+  applyEngineVersion,
+} from "./profile.js";
 import { parseProxy, probeUdp, proxyToArg, type ParsedProxy } from "./proxy.js";
 import type { Runtime } from "./runtime.js";
 import { applyScreenStrategy, defaultScreenModeFor, type ScreenStrategy } from "./screen.js";
@@ -200,7 +207,13 @@ export class Browser {
       argv.push("--remote-debugging-port=0", "--remote-allow-origins=*", "--shardx-automation");
     }
     if (opts.headless) argv.push("--headless=new");
-    if (opts.extraArgs) argv.push(...opts.extraArgs);
+    let extra = opts.extraArgs ?? [];
+    if (profile.claimsMobile) {
+      const { switches, rest } = androidBlinkSwitches(extra);
+      argv.push(...switches);
+      extra = rest;
+    }
+    argv.push(...extra);
 
     const child = spawn(this.runtime.binaryPath, argv, {
       env: { ...process.env, ...(opts.env ?? {}) },

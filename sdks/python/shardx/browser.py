@@ -26,7 +26,13 @@ from .auto_resolve import has_auto_fields, resolve_auto_fields
 from .geo import GeoInfo, geo_check_via
 from .profile import Profile, user_data_dir as _user_data_dir
 from .proxy import ParsedProxy, parse_proxy, probe_udp
-from .runtime import Runtime, apply_apple_webgpu_features, apply_chrome_brand, apply_engine_version
+from .runtime import (
+    Runtime,
+    android_blink_switches,
+    apply_apple_webgpu_features,
+    apply_chrome_brand,
+    apply_engine_version,
+)
 from .screen import apply_screen_strategy, default_mode_for
 
 _NOISE_DEFAULT = {
@@ -217,8 +223,11 @@ class Browser:
             ]
         if headless:
             argv.append("--headless=new")
-        if extra_args:
-            argv += list(extra_args)
+        extra = list(extra_args or [])
+        if profile.claims_mobile:
+            switches, extra = android_blink_switches(extra)
+            argv += switches
+        argv += extra
 
         proc_env = os.environ.copy()
         if env:

@@ -179,6 +179,61 @@ def apply_chrome_brand(config: dict) -> None:
     ch["brand"] = _CHROME_BRAND
 
 
+# Blink features Chromium 156 ships on desktop and leaves off on Android (`status`
+# in third_party/blink/renderer/platform/runtime_enabled_features.json5). A phone
+# profile turns them off, so a page finds Chrome for Android's API set.
+DESKTOP_ONLY_BLINK_FEATURES = (
+    "AudioOutputDevices",
+    "CaptureController",
+    "CaptureHandle",
+    "CapturedSurfaceControl",
+    "ComputePressure",
+    "DocumentPictureInPictureAPI",
+    "DocumentPictureInPicturePreferInitialPlacement",
+    "DocumentPictureInPictureUserActivation",
+    "FontAccess",
+    "GetDisplayMedia",
+    "NavigatorContentUtils",
+    "NotificationConstructor",
+    "RTCDiagnosticLogging",
+    "WebHID",
+)
+# On only on Android and implemented in Blink itself, so a desktop engine can
+# answer it: `window.orientation` and `orientationchange`.
+ANDROID_ONLY_BLINK_FEATURES = ("OrientationEvent",)
+
+
+def android_blink_switches(extra_args: list[str]) -> tuple[list[str], list[str]]:
+    """A phone profile's `--disable-blink-features` / `--enable-blink-features`,
+    and `extra_args` without the copies of those switches it folded in. Chromium
+    keeps only the last copy of a switch, so the caller's own (often
+    `--disable-blink-features=AutomationControlled`) joins ours instead of
+    replacing it, and a feature the caller names wins over our lists. SDK
+    equivalent of the launcher's `android_blink_features`."""
+    disable = list(DESKTOP_ONLY_BLINK_FEATURES)
+    enable = list(ANDROID_ONLY_BLINK_FEATURES)
+    rest: list[str] = []
+    for arg in extra_args:
+        if arg.startswith("--disable-blink-features="):
+            add, drop, value = disable, enable, arg.split("=", 1)[1]
+        elif arg.startswith("--enable-blink-features="):
+            add, drop, value = enable, disable, arg.split("=", 1)[1]
+        else:
+            rest.append(arg)
+            continue
+        for f in (x.strip() for x in value.split(",")):
+            if not f:
+                continue
+            if f in drop:
+                drop.remove(f)
+            if f not in add:
+                add.append(f)
+    switches = [f"--disable-blink-features={','.join(disable)}"]
+    if enable:
+        switches.append(f"--enable-blink-features={','.join(enable)}")
+    return switches, rest
+
+
 # WebGPU features Chrome 156 reports on Apple M-series that older templates lack.
 _APPLE_WEBGPU_ADDED = ("texture-compression-unaligned",)
 

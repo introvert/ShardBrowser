@@ -286,7 +286,7 @@ pub mod profile {
     use std::path::PathBuf;
 
     pub use super::write::{Made, SaveOpts};
-    pub use local::{claimed_screen, claims_mobile, names_a_window, OpenOn, Origin, ProfileMeta, StoredProfile};
+    pub use local::{claimed_screen, claims_linux_desktop, claims_mobile, names_a_window, OpenOn, Origin, ProfileMeta, StoredProfile};
 
     fn missing_here(id: &str) -> anyhow::Error {
         CmdError::Missing(format!("no profile {id} in your own space")).into()

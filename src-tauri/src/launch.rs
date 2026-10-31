@@ -853,9 +853,11 @@ fn command_line(
         args.push(format!("--shardx-extension-library={}", lib.display()));
     }
 
-    // Disable WebGPU when profile omits `webgpu` (matches real Linux Chrome).
+    // Disable WebGPU when the profile omits `webgpu`. Not for desktop Linux: Chrome
+    // there keeps navigator.gpu and answers the adapter request with nothing, which
+    // the engine does on its own; the switch would remove the object as well.
     let webgpu_present = ready.raw.get("webgpu").map(|v| !v.is_null()).unwrap_or(false);
-    if !webgpu_present {
+    if !webgpu_present && !profile::claims_linux_desktop(ready.raw) {
         args.push("--disable-features=WebGPU".into());
     }
 
@@ -972,9 +974,75 @@ fn command_line(
         args.push("--shardx-android-media".into());
     }
 
+    let extra = if profile::claims_mobile(&input.stored.config) {
+        android_blink_features(&mut args, extra)
+    } else {
+        extra
+    };
     // Operator's own switches, last so they win a repeat.
     args.extend(extra);
     args
+}
+
+/// Blink features that Chromium 156 ships on desktop and leaves off on Android
+/// (`status` in `third_party/blink/renderer/platform/runtime_enabled_features.json5`).
+/// A phone profile turns them off, so a page finds Chrome for Android's API set:
+/// `new Notification()` throws, and `getDisplayMedia`, `queryLocalFonts`,
+/// `navigator.hid`, `setSinkId` and document Picture-in-Picture are absent.
+const DESKTOP_ONLY_BLINK_FEATURES: &[&str] = &[
+    "AudioOutputDevices",
+    "CaptureController",
+    "CaptureHandle",
+    "CapturedSurfaceControl",
+    "ComputePressure",
+    "DocumentPictureInPictureAPI",
+    "DocumentPictureInPicturePreferInitialPlacement",
+    "DocumentPictureInPictureUserActivation",
+    "FontAccess",
+    "GetDisplayMedia",
+    "NavigatorContentUtils",
+    "NotificationConstructor",
+    "RTCDiagnosticLogging",
+    "WebHID",
+];
+
+/// On only on Android, and implemented in Blink itself, so it works in a desktop
+/// engine: `window.orientation` and `orientationchange`. Android-only features backed
+/// by a platform service (Contact Picker, Web NFC) stay off: a desktop engine has
+/// nothing to answer them with.
+const ANDROID_ONLY_BLINK_FEATURES: &[&str] = &["OrientationEvent"];
+
+/// Adds a phone profile's `--disable-blink-features` and `--enable-blink-features`.
+/// Chromium keeps only the last copy of a switch, so the operator's own copies in
+/// `extra` (often `--disable-blink-features=AutomationControlled`) are folded in
+/// rather than replacing ours, and a feature the operator names wins over our list.
+/// Returns `extra` without the copies it folded in.
+fn android_blink_features(args: &mut Vec<String>, extra: Vec<String>) -> Vec<String> {
+    let mut disable: Vec<String> = DESKTOP_ONLY_BLINK_FEATURES.iter().map(|s| s.to_string()).collect();
+    let mut enable: Vec<String> = ANDROID_ONLY_BLINK_FEATURES.iter().map(|s| s.to_string()).collect();
+    let mut rest = Vec::with_capacity(extra.len());
+    for arg in extra {
+        let (on, list) = if let Some(v) = arg.strip_prefix("--disable-blink-features=") {
+            (false, v)
+        } else if let Some(v) = arg.strip_prefix("--enable-blink-features=") {
+            (true, v)
+        } else {
+            rest.push(arg);
+            continue;
+        };
+        for f in list.split(',').map(str::trim).filter(|f| !f.is_empty()) {
+            let (add, drop) = if on { (&mut enable, &mut disable) } else { (&mut disable, &mut enable) };
+            drop.retain(|have| have != f);
+            if !add.iter().any(|have| have == f) {
+                add.push(f.to_string());
+            }
+        }
+    }
+    args.push(format!("--disable-blink-features={}", disable.join(",")));
+    if !enable.is_empty() {
+        args.push(format!("--enable-blink-features={}", enable.join(",")));
+    }
+    rest
 }
 
 /// How long a launch waits for the browser to publish its debugging port. Six
@@ -1711,9 +1779,76 @@ mod tests {
                 "--shardx-automation",
                 "--headless=new",
                 "--shardx-android-media",
+                "--disable-blink-features=AudioOutputDevices,CaptureController,CaptureHandle,\
+                 CapturedSurfaceControl,ComputePressure,DocumentPictureInPictureAPI,\
+                 DocumentPictureInPicturePreferInitialPlacement,DocumentPictureInPictureUserActivation,\
+                 FontAccess,GetDisplayMedia,NavigatorContentUtils,NotificationConstructor,\
+                 RTCDiagnosticLogging,WebHID",
+                "--enable-blink-features=OrientationEvent",
                 "--lang=de",
             ]
         );
+    }
+
+    fn blink(args: &[String], on: bool) -> Vec<String> {
+        let prefix = if on { "--enable-blink-features=" } else { "--disable-blink-features=" };
+        let found: Vec<&String> = args.iter().filter(|a| a.starts_with(prefix)).collect();
+        assert!(found.len() <= 1, "Chromium keeps only the last copy: {found:?}");
+        found
+            .first()
+            .map(|a| a[prefix.len()..].split(',').map(String::from).collect())
+            .unwrap_or_default()
+    }
+
+    /// Chrome on Linux keeps navigator.gpu and finds no adapter; only the engine can
+    /// answer that way, and the switch would take navigator.gpu away. Everyone else
+    /// without a `webgpu` block still gets it, a phone included.
+    #[test]
+    fn a_linux_desktop_profile_keeps_navigator_gpu() {
+        let off = |cfg: serde_json::Value| argv(&input(cfg, None), &UI, &settings()).contains(&"--disable-features=WebGPU".to_string());
+        assert!(!off(json!({ "_meta": { "id": "l1" }, "navigator": { "platform": "Linux x86_64" } })));
+        assert!(off(json!({ "_meta": { "id": "w1" }, "navigator": { "platform": "Win32" } })));
+        assert!(off(json!({ "_meta": { "id": "a1" }, "navigator": { "platform": "Linux armv8l" },
+                            "client_hints": { "mobile": true } })));
+        assert!(!off(json!({ "_meta": { "id": "w2" }, "navigator": { "platform": "Win32" }, "webgpu": { "vendor": "nvidia" } })));
+    }
+
+    /// A phone gets Chrome for Android's API set; a desktop profile gets no blink switch.
+    #[test]
+    fn only_a_phone_profile_turns_off_the_desktop_only_apis() {
+        let s = settings();
+        let desktop = argv(&input(json!({ "_meta": { "id": "d1" } }), None), &UI, &s);
+        assert!(!desktop.iter().any(|a| a.contains("-blink-features=")), "{desktop:?}");
+
+        for phone in [
+            json!({ "_meta": { "id": "m1" }, "client_hints": { "mobile": true } }),
+            json!({ "_meta": { "id": "m2" }, "navigator": { "user_agent":
+                "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Mobile Safari/537.36" } }),
+        ] {
+            let args = argv(&input(phone, None), &UI, &s);
+            assert_eq!(blink(&args, false), super::DESKTOP_ONLY_BLINK_FEATURES);
+            assert_eq!(blink(&args, true), super::ANDROID_ONLY_BLINK_FEATURES);
+        }
+    }
+
+    /// The operator's own blink switches join ours instead of replacing them, and what
+    /// the operator names wins over our list.
+    #[test]
+    fn a_phone_profile_folds_in_the_operators_blink_switches() {
+        let s = crate::settings::Settings {
+            extra_args: "--disable-blink-features=AutomationControlled,OrientationEvent \
+                         --lang=de --enable-blink-features=NotificationConstructor,Foo"
+                .into(),
+            ..settings()
+        };
+        let p = input(json!({ "_meta": { "id": "m3" }, "client_hints": { "mobile": true } }), None);
+        let args = argv(&p, &UI, &s);
+        let off = blink(&args, false);
+        assert!(off.contains(&"AutomationControlled".to_string()) && off.contains(&"OrientationEvent".to_string()));
+        assert!(off.contains(&"WebHID".to_string()));
+        assert!(!off.contains(&"NotificationConstructor".to_string()), "{off:?}");
+        assert_eq!(blink(&args, true), ["NotificationConstructor", "Foo"]);
+        assert_eq!(args.last().map(String::as_str), Some("--lang=de"));
     }
 
     /// Asked of the engine binary: a new engine gets no except-list (it hides the profile's
